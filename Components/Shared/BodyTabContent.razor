@@ -1,0 +1,125 @@
+@inject IJSRuntime JSRuntime
+@inject AppState AppState
+
+<div class="row">
+    <div class="col-12">
+        <label class="form-label text-white-50 me-5">Body Type:</label>
+        @foreach(var bodyType in Enum.GetNames<BodyType>())
+        {
+            <label class="text-white-50 me-5">
+                <input type="radio" 
+                       class="form-check-input" 
+                       name="bodyType" 
+                       value="@bodyType" 
+                       checked="@(_selectedBodyType == bodyType)"
+                       @onchange="SetSelectedBodyType" />
+                <span class="ms-1">@bodyType</span>
+            </label>
+        }
+    </div>
+</div>
+<div class="row">
+    @if(_selectedBodyType == nameof(BodyType.None))
+    {
+        <div class="d-flex justify-content-center mt-3">
+            <p class="text-white-50">This request does not have any body</p>
+        </div>
+    }
+    else
+    {
+        <div class="col-12">
+            <pre id="@BodyId"
+                 class="w-100 h-100 border-1 bg-black text-white-50 m-0 p-3" 
+                 contenteditable
+                 @onfocusin="OnFocusIn"
+                 @onfocusout="OnFocusOut"
+                 style="min-height: 250px;">
+                @_jsonBody
+            </pre>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RequestModel SelectedRequest {get;set;}
+    private const string BodyId = "req-id";
+    private const string DefaultText = "Enter/Paste JSON body here";
+    private string _selectedBodyType = nameof(BodyType.None);
+    private string? _jsonBody = DefaultText;
+    private Func<Task>? _executeOnNextRender;
+    protected override void OnInitialized()
+    {
+        AppState.SetBodyValueGetter(() => _jsonBody == DefaultText ? null : _jsonBody);
+    }
+    private int _prevId;
+    protected override void OnParametersSet()
+    {
+        if (_prevId != SelectedRequest.Id)
+        {
+            _prevId = SelectedRequest.Id;
+            if (!string.IsNullOrWhiteSpace(SelectedRequest.Body))
+            {
+                _selectedBodyType = nameof(BodyType.Json);
+                _jsonBody = SelectedRequest.Body;
+            }
+            else 
+            {
+                 _selectedBodyType = nameof(BodyType.None);
+                _jsonBody = DefaultText;
+            }
+        }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_executeOnNextRender is not null)
+        {
+            await _executeOnNextRender.Invoke();
+            _executeOnNextRender = null;
+        }
+    }
+    private void SetSelectedBodyType(ChangeEventArgs e)
+    {
+        _selectedBodyType = e.Value!.ToString()!;
+        if (_selectedBodyType == nameof(BodyType.Json))
+        {
+            _executeOnNextRender = async () => await JSRuntime.InvokeVoidAsync("removeFormattingWhilePasting", BodyId);
+        }
+    }
+    private async Task<string?> GetBodyTextAsync()
+    {
+        try {
+            return await JSRuntime.InvokeAsync<string?>("getHtmlFromContentEditable", BodyId);
+        }
+        catch (Exception ex)
+        {
+
+        }
+        return null;
+    }
+    private async Task OnFocusIn()
+    {
+        var bodyText = await GetBodyTextAsync();
+        if (string.IsNullOrWhiteSpace(bodyText) || bodyText == DefaultText)
+        {
+            _jsonBody = null;
+            await JSRuntime.InvokeVoidAsync("setHtmlToContentEditable", BodyId, null);
+        }
+    }
+    private async Task OnFocusOut()
+    {
+        var bodyText = await GetBodyTextAsync();
+        if (string.IsNullOrWhiteSpace(bodyText))
+        {
+            _jsonBody = DefaultText;
+            await JSRuntime.InvokeVoidAsync("setHtmlToContentEditable", BodyId, DefaultText);
+        }
+        else _jsonBody = bodyText;
+    }
+    private enum BodyType
+    {
+        None,
+        Json
+    }
+
+}

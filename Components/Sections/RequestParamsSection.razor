@@ -1,0 +1,63 @@
+﻿<div class="d-flex tabbar">
+    @foreach(var tab in Enum.GetNames<Tab>())
+    {
+        <label class="tab-label @(_selectedTab == tab ? "active": "")" 
+               @onclick="() => _selectedTab = tab" 
+               @key="tab">
+            @tab
+        </label>
+    }
+</div>
+<div class="tab-control">
+    @foreach(var tab in Enum.GetNames<Tab>())
+    {
+        <div class="content @(_selectedTab == tab ? "active": "")" @key="tab" >
+            @_tabContentComponents[tab].Invoke(SelectedRequest)
+        </div>
+    }
+</div>
+
+<style type="text/css">
+    .tabbar {
+        background-color: #333;
+        color: white;
+    }
+
+    .tab-label {
+        padding: 10px;
+        cursor: pointer;
+    }
+
+    .tab-label.active {
+        text-decoration: underline;
+        text-underline-offset: 5px;
+    }
+
+    .content {
+        display:none;
+    }
+    .content.active {
+        display:inherit
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired]
+    public RequestModel SelectedRequest {get;set;}
+    private string _selectedTab = nameof(Tab.Parameters);
+    private IReadOnlyDictionary<string, Func<RequestModel, RenderFragment>> _tabContentComponents =
+        new Dictionary<string,Func<RequestModel, RenderFragment>>
+            {
+                [nameof(Tab.Parameters)] = (request) => @<QueryParametersTabContent SelectedRequest="request" />,
+                [nameof(Tab.Authorization)] = (request) => @<AuthorizationTabContent SelectedRequest="request" />,
+                [nameof(Tab.Headers)] = (request) => @<HeadersTabContent SelectedRequest="request" />,
+                [nameof(Tab.Body)] = (request) => @<BodyTabContent SelectedRequest="request" />
+            };
+
+    private enum Tab {
+        Parameters,
+        Authorization,
+        Headers,
+        Body
+    }
+}

@@ -1,0 +1,101 @@
+@inject AppState AppState
+
+<span class="text-white-50 d-block">Query String: @_queryString</span>
+<ul class="m-0 p-0">
+    @for (var idx=0; idx<_queryParameters.Count; idx++)
+    {
+        var queryParameter = _queryParameters[idx];
+        <li class="d-flex gap-1 my-2">
+            <input type="text" 
+                   value="@queryParameter.Key"
+                   @oninput="(e) => SetKey(e, queryParameter)"
+                   placeholder="Key" 
+                   class="form-control bg-black text-white-50 border-dark ph-gray" />
+            <input type="text" 
+                   value="@queryParameter.Value"
+                   @oninput="(e) => SetValue(e, queryParameter)"
+                   placeholder="Value" 
+                   class="form-control bg-black text-white-50 border-dark ph-gray" />
+            <button type="button" 
+                    class="btn btn-sm btn-default" 
+                    @onclick="() => DeleteParam(queryParameter)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff0000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash2-icon lucide-trash-2"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+        </li>
+    }
+</ul>
+
+<div class="d-flex align-items-center w-100">
+    <hr class="bg-black" style="width: calc(50% - 50px); height: 2px" />
+    <button type="button" 
+            class="btn btn-sm btn-outline-dark text-white" 
+            style="width: 100px;" 
+            @onclick="AddParam">
+        + Add
+    </button>
+    <hr class="bg-black" style="width: calc(50% - 50px); height: 2px" />
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RequestModel SelectedRequest {get;set;}
+    private string? _queryString;
+    private List<KeyValueModel> _queryParameters = [new()];
+    protected override void OnInitialized()
+    {
+        AppState.SetQueryStringGetter(() => _queryString);
+        AppState.OnUrlPastedWithQueryString += OnUrlPastedWithQueryString;
+    }
+    private void OnUrlPastedWithQueryString(object? _, string queryString)
+    {
+        if(!string.IsNullOrWhiteSpace(queryString))
+        {
+            _queryParameters = queryString.Split('&')
+                .Select(q => {
+                    var parts = q.Split('=');
+                    var keyValueModel = new KeyValueModel {Key = parts[0]};
+                    if (parts.Length > 1)
+                        keyValueModel.Value = parts[1];
+                    return keyValueModel;
+                }).ToList();
+            _queryParameters.Add(new());
+            RecreateQueryString();
+            StateHasChanged();
+        }
+    }
+    private int _prevId;
+    protected override void OnParametersSet()
+    {
+        if (_prevId != SelectedRequest.Id)
+        {
+            _prevId = SelectedRequest.Id;
+            _queryParameters = [.. SelectedRequest.QueryParameters, new()];
+            RecreateQueryString();
+            AppState.NotifyQueryStringParametersSet();
+        }
+    }
+    private void AddParam() => _queryParameters.Add(new());
+    private void DeleteParam(KeyValueModel queryParameter)
+    {
+        _queryParameters.Remove(queryParameter);
+        RecreateQueryString();
+    }
+    private void SetKey(ChangeEventArgs e, KeyValueModel queryParameter)
+    {
+        queryParameter.Key = e.Value?.ToString();
+        RecreateQueryString();
+    }
+    private void SetValue(ChangeEventArgs e, KeyValueModel queryParameter)
+    {
+        queryParameter.Value = e.Value?.ToString();
+        RecreateQueryString();
+    }
+    private void RecreateQueryString()
+    {
+        var availableQueryParams = _queryParameters
+            .Where(q => !string.IsNullOrWhiteSpace(q.Key))
+            .Select(q =>  $"{q.Key}={q.Value}");
+
+        _queryString = string.Join('&', availableQueryParams);
+    }
+}

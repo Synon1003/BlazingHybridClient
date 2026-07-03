@@ -1,0 +1,103 @@
+﻿@page "/"
+@using System.Text.Json
+@using BlazingHybridClient.Data
+@inject DatabaseContext DatabaseContext
+@inject AppState AppState
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-3 bg-dark vh-100">
+            <HistorySection OnSelect="OnRequestSelected" />
+        </div>
+        <div class="col-9 bg-gray">
+            <div class="d-flex flex-column vh-100">
+                <div style="height: 100px;">
+                    <RequestMethodUrlSection OnRequestSend="MakeHttpCallAsync" 
+                                             SelectedRequest="_selectedRequest"
+                                             OnNewRequest="() => OnRequestSelected(new())" />
+                </div>
+                <div class="d-grid" style="height: calc(100vh - 100px); grid-template-rows: 50% 50%">
+                    <div class="">
+                        <RequestParamsSection SelectedRequest="_selectedRequest" />
+                    </div>
+                    <div class="" style="height: 100%; overflow-x: hidden; overflow-y: auto;">
+                        <div class="d-flex justify-content-between align-items-center bg-gray" style="height: 45px;">
+                            <h6 class="m-0 fw-bold text-white-50">Response</h6>
+                            <div>
+                                @if(!string.IsNullOrEmpty(_statusCode))
+                                {
+                                    <label class="text-white-50">
+                                        @_statusCode
+                                    </label>
+                                }
+                            </div>
+                        </div>
+                        <div class="bg-white" style="height: calc(100% - 45px); overflow-x: hidden; overflow-y: auto;">
+                            <ResponseSection ResponseText="@_responseText" RequestSent="_requestSent" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string? _responseText;
+    private string? _statusCode;
+    private bool _requestSent;
+    private RequestModel _selectedRequest = new();
+    private void OnRequestSelected(RequestModel requestModel)
+    {
+        _selectedRequest = requestModel;
+        _requestSent = false;
+        _responseText = string.Empty;
+        _statusCode = null;
+    }
+    private async Task MakeHttpCallAsync((HttpRequestMessage request, RequestModel requestModel) requestAndModel)
+    {
+        var (request, requestModel) = requestAndModel;
+        try {
+            _requestSent = true;
+            _responseText = "Making http call...";
+            AppState.ShowLoader = true;
+
+            var httpClient = new HttpClient();
+            var responseMessage = await httpClient.SendAsync(request);
+
+            var requestEntity = requestModel.ToEntity();
+            await DatabaseContext.AddRequestHistoryAsync(requestEntity);
+            requestModel.Id = requestEntity.Id;
+            AppState.NotifyHistoryAdded(requestModel);
+            _selectedRequest = requestModel;
+
+            _statusCode = $"{(int)responseMessage.StatusCode} {responseMessage.ReasonPhrase}";
+            if (responseMessage.IsSuccessStatusCode)
+            {
+                var content = await responseMessage.Content.ReadAsStringAsync();
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    var contentType = responseMessage.Content.Headers.ContentType?.MediaType;
+                    if (contentType == "application/json")
+                    {
+                        using var jsonDoc = JsonDocument.Parse(content);
+                        _responseText = JsonSerializer.Serialize(
+                            jsonDoc.RootElement, new JsonSerializerOptions() { WriteIndented = true });
+                    }
+                    else _responseText = content;
+                }
+            }
+            else _responseText = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _responseText = ex.Message;
+            _statusCode = null;
+            await MauiInterop.ShowAlertAsync(ex.Message, "Error");
+        }
+        finally
+        {
+            AppState.ShowLoader = false;
+        }
+    }
+}

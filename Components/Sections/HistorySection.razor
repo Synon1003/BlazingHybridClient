@@ -1,0 +1,79 @@
+﻿@using BlazingHybridClient.Data
+@inject DatabaseContext DatabaseContext
+@inject AppState AppState
+
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <h6 class="text-white-50 fw-bold">History</h6>
+    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearAllAsync">Clear</button>
+</div>
+<hr class="bg-black my-2" />
+
+<ul class="list-unstyled m-0 p-0">
+    @foreach(var group in _groupedRequests)
+    {
+        <li class="text-white fw-bold">
+            <h6 class="fw-bold">@group.Key</h6>
+            <ul class="list-unstyled m-0 p-0">
+                @foreach(var h in group.Value)
+                {
+                    <li class="d-grid gap-1 mb-2" style="grid-template-columns: 60px auto 30px" title="@h.Url">
+                        <span class="fw.bold text-white-50 mt-2" @onclick="() => SelectRequestAsync(h)">@h.Method</span>
+                        <span class="text-white-50 text-truncate mt-2 d-inline-block" @onclick="() => SelectRequestAsync(h)">@h.Url</span>
+                        <button type="button" class="btn btn-sm btn-default" @onclick="() => DeleteRequestAsync(h)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff0000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash2-icon lucide-trash-2"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </li>
+                }
+            </ul>
+            
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter, EditorRequired]
+    public EventCallback<RequestModel> OnSelect {get;set;}
+    private List<RequestModel> _requests = [];
+    private IDictionary<string, RequestModel[]> _groupedRequests = 
+        new Dictionary<string, RequestModel[]>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var requestHistories = await DatabaseContext.GetRequestHistoriesAsync();
+        _requests = requestHistories.Select(h => RequestModel.FromEntity(h)).ToList();
+        ComputeRequestGroups();
+
+        AppState.OnHistoryAdded += OnHistoryAdded;
+    }
+
+    private void OnHistoryAdded(object? _, RequestModel requestModel)
+    {
+        _requests.Insert(0, requestModel);
+        ComputeRequestGroups();
+        StateHasChanged();
+    }
+    private void ComputeRequestGroups()
+    {
+        _groupedRequests = _requests
+            .OrderByDescending(r => r.At)
+            .GroupBy(r => r.At.Date)
+            .ToDictionary(g => g.Key.ToString("yyyy-MM-dd"), g => g.ToArray());
+    }
+    private async Task DeleteRequestAsync(RequestModel requestModel)
+    {
+        await DatabaseContext.DeleteRequestHistoryByIdAsync(requestModel.Id);
+        _requests.Remove(requestModel);
+        ComputeRequestGroups();
+    }
+    private async Task ClearAllAsync()
+    {
+        if (await MauiInterop.ConfirmAsync("Are you sure you want to clear all history?", "Clear History"))
+        {
+            await DatabaseContext.DeleteAllRequestHistoriesAsync();
+            _requests.Clear();
+            _groupedRequests.Clear();
+        }
+    }
+    private async Task SelectRequestAsync(RequestModel requestModel)
+        => await OnSelect.InvokeAsync(requestModel);
+}

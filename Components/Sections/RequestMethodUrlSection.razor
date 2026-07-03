@@ -1,0 +1,197 @@
+﻿@inject AppState AppState
+
+<div class="d-flex justify-content-between align-items-center">
+    <h6 class="my-3 text-white-50 fw-bold">
+        @(string.IsNullOrWhiteSpace(_url) ? "Untitled Request": FullUrl)
+    </h6>
+    <button type="button" class="btn btn-sm btn-warning" @onclick="OnNewRequest">New Request</button>
+</div>
+<div class="input-group">
+    <button type="button" 
+            class="btn btn-dark bg-black dropdown-toggle text-start @(_methodDropdownShown ? "show": "")" 
+            aria-expanded="@(_methodDropdownShown ? "true": "false")" @onclick="ToggleMethodsDropdown" style="width: 120px;">
+        @_selectedMethod
+    </button>
+    <ul class="dropdown-menu @(_methodDropdownShown ? "show": "")"
+        style="@(_methodDropdownShown ? "position: absolute; inset: 0px auto auto 0px; margin: 0px; transform: translate3d(0px, 39px, 0px);": "")">
+        <li>
+            <button type="button" class="dropdown-item" @onclick="@(() => SetSelectedMethod("GET"))">GET</button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" @onclick="@(() => SetSelectedMethod("POST"))">POST</button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" @onclick="@(() => SetSelectedMethod("PUT"))">PUT</button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" @onclick="@(() => SetSelectedMethod("PATCH"))">PATCH</button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" @onclick="@(() => SetSelectedMethod("DELETE"))">DELETE</button>
+        </li>
+    </ul>
+    <input type="text" 
+           class="form-control bg-black text-white-50 border-dark ph-gray" 
+           placeholder="Enter/Paste URL"
+           @bind="_url"
+           @bind:event="oninput"
+           @onkeypress="OnKeyPress"
+           @onpaste="OnUrlPaste" />
+    <button type="button" class="btn btn-dark bg-black" @onclick="MakeHttpCallAsync">Send</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RequestModel SelectedRequest {get;set;}
+
+    [Parameter, EditorRequired]
+    public EventCallback<(HttpRequestMessage, RequestModel)> OnRequestSend {get;set;}
+
+    [Parameter, EditorRequired]
+    public EventCallback OnNewRequest {get;set;}
+    private bool _methodDropdownShown = false;
+    private string _selectedMethod = "GET";
+    private Action? _executeOnNextRender;
+
+    private string? _url;
+    private string FullUrl
+    {
+        get 
+        {
+            if (string.IsNullOrWhiteSpace(_url))
+                return "";
+
+            var queryString =  AppState.QueryStringGetter.Invoke();
+            if (!string.IsNullOrWhiteSpace(queryString))
+            {
+                return $"{_url.TrimEnd('?')}?{queryString.TrimStart('?')}";
+            }
+
+            return _url;
+        }
+    }
+    protected override void OnInitialized()
+    {
+        AppState.OnQueryStringParametersSet += (_, _) => StateHasChanged();
+    }
+    private int _prevId;
+    protected override void OnParametersSet()
+    {
+        if (_prevId != SelectedRequest.Id)
+        {
+            _prevId = SelectedRequest.Id;
+            _url = SelectedRequest.Url;
+            _selectedMethod = SelectedRequest.Method ?? "GET";
+        }
+    }
+
+    private void ToggleMethodsDropdown() => _methodDropdownShown = !_methodDropdownShown;
+    private void SetSelectedMethod(string method)
+    {
+        _selectedMethod = method;
+        _methodDropdownShown = false;
+    }
+    private async Task OnKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await MakeHttpCallAsync();
+        }
+    }
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (_executeOnNextRender is not null)
+        {
+            _executeOnNextRender.Invoke();
+            _executeOnNextRender = null;
+        }
+    }
+    private void OnUrlPaste()
+    {
+        _executeOnNextRender = () => 
+        {
+            if (_url?.Contains('?') == true)
+            {
+                var parts = _url.Split('?', 
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                _url = parts[0];
+                if (parts.Length > 1)
+                {
+                    var queryString = parts[1];
+                    AppState.NotifyUrlPastedWithQueryString(queryString);
+                    StateHasChanged();
+                }
+            }
+        };
+    }
+    private async Task MakeHttpCallAsync()
+    {
+        // await MauiInterop.ShowAlertAsync($"Making http call... with queryString: {queryString}", "Http Call");
+        if (string.IsNullOrWhiteSpace(_url))
+        {
+            return;
+        }
+        if (!_url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && 
+            !_url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            _url = "https://" + _url;
+            StateHasChanged();
+        }
+        if(!Uri.IsWellFormedUriString(_url, UriKind.Absolute))
+        {
+            await MauiInterop.ShowAlertAsync("Please enter a valid Url", "Invalid Url");
+            return;
+        }
+
+        var requestModel = new RequestModel
+        {
+            Method = _selectedMethod,
+            Url = _url,
+            At = DateTime.Now,
+        };
+
+        var queryString =  AppState.QueryStringGetter.Invoke();
+        if (!string.IsNullOrWhiteSpace(queryString))
+        {
+            requestModel.QueryParameters = queryString.Split('&', 
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(q => {
+                    var parts = q.Split('=');
+                    var keyValueModel = new KeyValueModel
+                    {
+                        Key = parts[0]
+                    };
+                    if (parts.Length > 1)
+                    {
+                        keyValueModel.Value = parts[1];
+                    }
+                    return keyValueModel;
+                }).ToList();
+        }
+
+        var request = new HttpRequestMessage(new HttpMethod(_selectedMethod), FullUrl);
+        var headers = AppState.RequestHeadersValueGetter.Invoke() ?? [];
+        foreach (var header in headers)
+        {
+            request.Headers.Add(header.Key, header.Value);
+            requestModel.Headers.Add(header);
+        }
+        var authorizationHeaderValue = AppState.AuthorizationHeaderValueGetter.Invoke();
+        if (!string.IsNullOrWhiteSpace(authorizationHeaderValue))
+        {
+            request.Headers.Add("Authorization", authorizationHeaderValue);
+            requestModel.AuthHeaderValue = authorizationHeaderValue;
+        }
+        if (request.Method == HttpMethod.Post || request.Method == HttpMethod.Put)
+        {
+            var body = AppState.BodyValueGetter.Invoke()?.Replace("\n", "");
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                var bodyContent = new StringContent(body, null, "application/json");
+                request.Content = bodyContent;
+                requestModel.Body = body;
+            }
+        }
+        await OnRequestSend.InvokeAsync((request, requestModel));
+    }
+}

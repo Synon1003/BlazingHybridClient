@@ -1,0 +1,153 @@
+@inject AppState AppState
+
+<span class="text-white-50 d-block mb-2">Auth Value: @_authorizationHeaderValue</span>
+<div class="row">
+    <div class="col-3">
+        <div class="mb-3">
+            <label class="text-white-50 mb-2">Auth Type</label>
+            <select class="form-control bg-black text-white-50 border-dark" @bind="@SelectedAuthType">
+                @foreach(var authType in Enum.GetValues<AuthType>())
+                {
+                    <option value="@authType">@authType</option>
+                }
+            </select>
+        </div>
+    </div>
+    <div class="col-1 d-flex justify-content-center">
+        <div class="vr bg-black" style="width: 2px;"></div>
+    </div>
+    <div class="col-8">
+        @switch (_selectedAuthType)
+        {
+            case nameof(AuthType.None):
+                <div class="">
+                    <div class="d-flex justify-content-center mt-3">
+                        <p class="text-white-50">This request does not use any authorization</p>
+                    </div>
+                </div>
+            break;
+            case nameof(AuthType.Basic):
+                <div class="row mb-3">
+                    <div class="col-2">
+                        <label class="form-label text-white-50">Username:</label>
+                    </div>
+                    <div class="col-4">
+                        <input type="text" @bind="Username" @bind:event="oninput" placeholder="Enter username" class="form-control bg-black text-white-50 border-dark ph-gray" />
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-2">
+                        <label class="form-label text-white-50">Password:</label>
+                    </div>
+                    <div class="col-4">
+                        <input type="password" @bind="Password" @bind:event="oninput" placeholder="Enter password" class="form-control bg-black text-white-50 border-dark ph-gray" />
+                    </div>
+                </div>
+            break;
+            case nameof(AuthType.Bearer):
+                <div class="row">
+                    <div class="col-2">
+                        <label class="form-label text-white-50">Token:</label>
+                    </div>
+                    <div class="col-10">
+                        <textarea @bind="Token" @bind:event="oninput" placeholder="Enter/Paste token" rows="5" class="form-control bg-black text-white-50 border-dark ph-gray" ></textarea>
+                    </div>
+                </div>
+            break;
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RequestModel SelectedRequest {get;set;}
+    private string _selectedAuthType = nameof(AuthType.None);
+    public string SelectedAuthType
+    {
+        get => _selectedAuthType;
+        set { _selectedAuthType = value; ComputeAuthorizationHeaderValue(); }
+    }
+    private string? _authorizationHeaderValue;
+    public string? _username;
+    public string? Username
+    {
+        get => _username;
+        set { _username = value; ComputeAuthorizationHeaderValue(); }
+    }
+    public string? _password;
+    public string? Password
+    {
+        get => _password;
+        set { _password = value; ComputeAuthorizationHeaderValue(); }
+    }
+    private string? _token;
+    public string? Token
+    {
+        get => _token;
+        set { _token = value; ComputeAuthorizationHeaderValue(); }
+    }
+    protected override void OnInitialized()
+    {
+        AppState.SetAuthorizationHeaderValueGetter(() => _authorizationHeaderValue);
+    }
+    private int _prevId;
+    protected override void OnParametersSet()
+    {
+        if (_prevId != SelectedRequest.Id)
+        {
+            _prevId = SelectedRequest.Id;
+            if (!string.IsNullOrWhiteSpace(SelectedRequest.AuthHeaderValue))
+            {
+                if (SelectedRequest.AuthHeaderValue.StartsWith("Basic"))
+                {
+                    SelectedAuthType = nameof(AuthType.Basic);
+                    var authValue = SelectedRequest.AuthHeaderValue.Replace("Basic ", "");
+                    var valueByteArray = Convert.FromBase64String(authValue);
+                    var valueString = System.Text.Encoding.UTF8.GetString(valueByteArray);
+
+                    var parts = valueString.Split(':');
+                    Username = parts[0];
+                    if (parts.Length > 1)
+                        Password = parts[1];
+                    else Password = null;
+                }
+                else if (SelectedRequest.AuthHeaderValue.StartsWith("Bearer"))
+                {
+                    SelectedAuthType = nameof(AuthType.Bearer);
+                    Token = SelectedRequest.AuthHeaderValue.Replace("Bearer ", "");
+                }
+            }
+            else
+            {
+                SelectedAuthType = nameof(AuthType.None);
+            }
+        }
+    }
+    private void ComputeAuthorizationHeaderValue()
+    {
+        switch (_selectedAuthType)
+        {
+            case nameof(AuthType.Basic):
+                // base64
+                if(!string.IsNullOrWhiteSpace(Username))
+                {
+                    var value = $"{Username}:{Password}";
+                    var valueByteArray = System.Text.Encoding.UTF8.GetBytes(value);
+                    _authorizationHeaderValue = $"Basic {Convert.ToBase64String(valueByteArray)}";
+                }
+                else
+                    _authorizationHeaderValue = null;
+            break;
+            case nameof(AuthType.Bearer):
+                _authorizationHeaderValue = $"Bearer {_token}";
+            break;
+            default: _authorizationHeaderValue = null; break;
+        }
+    }
+
+    private enum AuthType {
+        None,
+        Basic,
+        Bearer
+    }
+}
